@@ -7,14 +7,12 @@ from urllib.parse import urlparse, parse_qs
 import faiss
 import numpy as np
 from sentence_transformers import SentenceTransformer
-from fuzzywuzzy import process
-import whisper
-import yt_dlp
-from pydub import AudioSegment
+import requests
 
 # --- CONFIGURE API KEYS ---
-YOUTUBE_API_KEY = "AIzaSyBaNVUck5LpBp_t03g9SsxQgNG9e_KSA_o"  # Your YouTube API Key
-GEMINI_API_KEY = "AIzaSyCqRjVXULLvSqVCoJYit6fOAXPWqLAQfUs"  # Your Google Gemini API Key
+YOUTUBE_API_KEY = "AIzaSyBaNVUck5LpBp_t03g9SsxQgNG9e_KSA_o"  # Replace with your YouTube API key
+GEMINI_API_KEY = "AIzaSyCqRjVXULLvSqVCoJYit6fOAXPWqLAQfUs"  # Replace with your Google Gemini API key
+ASSEMBLYAI_API_KEY = "f8e218e5b7354f72ae11baeaff8d802f"  # Your AssemblyAI API key
 
 # --- Initialize Google Gemini API ---
 genai.configure(api_key=GEMINI_API_KEY)
@@ -46,71 +44,51 @@ def clean_url(video_url):
     video_id = query_params.get("v", [None])[0]
     return (f"https://www.youtube.com/watch?v={video_id}", video_id) if video_id else (None, None)
 
-# --- FUNCTION: Fetch Available Transcripts ---
-def list_transcripts(video_id):
-    try:
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        return [t.language_code for t in transcript_list]
-    except Exception as e:
-        return f"Error listing transcripts: {str(e)}"
-
-# --- FUNCTION: Fetch Transcript with YouTubeTranscriptApi ---
+# --- FUNCTION: Fetch Transcript using YouTubeTranscriptAPI ---
 @st.cache_data
 def fetch_transcript(video_id):
     try:
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
 
-        # Try to fetch manually created English transcript first
         for transcript in transcript_list:
             if transcript.language_code == "en":
                 return " ".join([entry["text"] for entry in transcript.fetch()])
 
-        # If no English, try auto-generated transcript
         for transcript in transcript_list:
             if transcript.is_generated:
                 return " ".join([entry["text"] for entry in transcript.fetch()])
 
-        return "⚠️ No English or auto-generated transcript found."
+        return "**No transcript found via API. Trying external transcription...**"
     
     except (TranscriptsDisabled, NoTranscriptFound):
-        return transcribe_audio_whisper(f"https://www.youtube.com/watch?v={video_id}")
+        return transcribe_audio_assemblyai(f"https://www.youtube.com/watch?v={video_id}")
 
     except Exception as e:
         return f"Error fetching transcript: {str(e)}"
 
-# --- FUNCTION: Whisper AI Transcription ---
-import pytube
-
-import yt_dlp
-
-def transcribe_audio_whisper(video_url):
+# --- FUNCTION: Transcribe Audio using AssemblyAI ---
+def transcribe_audio_assemblyai(video_url):
     try:
-        audio_file = "temp_audio.mp3"
-        
-        # Use yt-dlp to download audio
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': audio_file,
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-        }
+        headers = {"authorization": ASSEMBLYAI_API_KEY}
+        response = requests.post("https://api.assemblyai.com/v2/transcript",
+                                 json={"audio_url": video_url},
+                                 headers=headers)
+        data = response.json()
+        transcript_id = data.get("id")
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([video_url])
+        # Wait for the transcript to be processed
+        while True:
+            transcript_response = requests.get(f"https://api.assemblyai.com/v2/transcript/{transcript_id}",
+                                               headers=headers)
+            transcript_data = transcript_response.json()
 
-        # Transcribe using Whisper
-        model = whisper.load_model("base")
-        result = model.transcribe(audio_file)
-
-        os.remove(audio_file)  # Clean up
-        return result["text"]
-
+            if transcript_data.get("status") == "completed":
+                return transcript_data["text"]
+            elif transcript_data.get("status") == "failed":
+                return "❌ Failed to transcribe the audio."
+    
     except Exception as e:
-        return f"Error with Whisper AI: {str(e)}"
-
+        return f"Error with external transcription: {str(e)}"
 
 # --- FUNCTION: Summarize Transcript using Google Gemini API ---
 @st.cache_data
@@ -147,45 +125,4 @@ def answer_question(transcript, question):
         relevant_sentences = ". ".join([sentences[idx] for idx in indices[0]])
 
         model = genai.GenerativeModel(model_name="gemini-1.5-pro")
-        response = model.generate_content(f"Context:\n{relevant_sentences}\n\nAnswer this question: {question}")
-
-        return response.text.strip()
-    except Exception as e:
-        return f"Error answering question: {str(e)}"
-
-# --- UI Tabs for Layout ---
-tab1, tab2, tab3 = st.tabs(["📄 Transcription", "📑 Summarization", "❓ Q/A"])
-
-with tab1:
-    st.subheader("Transcript")
-    
-    if st.button("Generate Transcript") and video_url:
-        _, video_id = clean_url(video_url)
-        if video_id:
-            st.session_state.transcript = fetch_transcript(video_id)
-
-    if st.session_state.transcript:
-        st.text_area("Transcript", st.session_state.transcript, height=300, key="transcript_tab1")
-
-with tab2:
-    st.subheader("Summary")
-    
-    if st.session_state.transcript:
-        st.text_area("Transcript", st.session_state.transcript, height=150, disabled=True, key="transcript_tab2")
-
-        if st.button("Summarize Content"):
-            st.session_state.summary = summarize_transcript(st.session_state.transcript)
-        
-        if st.session_state.summary:
-            st.text_area("Summary", st.session_state.summary, height=200, key="summary_tab")
-
-with tab3:
-    st.subheader("Ask a Question")
-
-    if st.session_state.transcript:
-        st.text_area("Transcript", st.session_state.transcript, height=150, disabled=True, key="transcript_tab3")
-
-        question = st.text_input("Ask a question about the video:")
-        if st.button("Get Answer"):
-            answer = answer_question(st.session_state.transcript, question)
-            st.write("Answer:", answer)
+        response 
