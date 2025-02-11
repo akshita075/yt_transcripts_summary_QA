@@ -79,41 +79,38 @@ def fetch_transcript(video_id):
         return f"Error fetching transcript: {str(e)}"
 
 # --- FUNCTION: Whisper AI Transcription ---
+import pytube
+
+import yt_dlp
+
 def transcribe_audio_whisper(video_url):
     try:
         audio_file = "temp_audio.mp3"
-
-        # yt-dlp options to download the best audio format
+        
+        # Use yt-dlp to download audio
         ydl_opts = {
-            "format": "bestaudio/best",
-            "outtmpl": audio_file,
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "192",
+            'format': 'bestaudio/best',
+            'outtmpl': audio_file,
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
             }],
         }
 
-        # Download the audio using yt-dlp
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([video_url])
 
-        # Convert MP3 to WAV using pydub
-        wav_file = "temp_audio.wav"
-        AudioSegment.from_file(audio_file).export(wav_file, format="wav")
-
-        # Use Whisper AI for transcription
+        # Transcribe using Whisper
         model = whisper.load_model("base")
-        result = model.transcribe(wav_file)
+        result = model.transcribe(audio_file)
 
-        # Cleanup temporary files
-        os.remove(audio_file)
-        os.remove(wav_file)
-
+        os.remove(audio_file)  # Clean up
         return result["text"]
 
     except Exception as e:
         return f"Error with Whisper AI: {str(e)}"
+
 
 # --- FUNCTION: Summarize Transcript using Google Gemini API ---
 @st.cache_data
