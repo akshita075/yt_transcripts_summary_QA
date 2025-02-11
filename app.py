@@ -158,31 +158,27 @@ with tab1:
             st.session_state.transcript = fetch_transcript(video_id)
 
     if st.session_state.transcript:
-        st.text_area("Transcript", st.session_state.transcript, height=300)
+        st.text_area("Transcript", st.session_state.transcript, height=300, key="transcript_tab1")
 
 with tab2:
     st.subheader("Summary")
-
+    
     if st.session_state.transcript:
-        st.text_area("Transcript", st.session_state.transcript, height=150, disabled=True)
+        st.text_area("Transcript", st.session_state.transcript, height=150, disabled=True, key="transcript_tab2")
 
         if st.button("Summarize Content"):
             st.session_state.summary = summarize_transcript(st.session_state.transcript)
         
         if st.session_state.summary:
-            st.text_area("Summary", st.session_state.summary, height=200)
-    else:
-        st.warning("⚠️ Please generate a transcript first.")
+            st.text_area("Summary", st.session_state.summary, height=200, key="summary_tab")
 
 with tab3:
     st.subheader("Ask a Question")
 
     if st.session_state.transcript:
-        st.text_area("Transcript", st.session_state.transcript, height=150, disabled=True)
+        st.text_area("Transcript", st.session_state.transcript, height=150, disabled=True, key="transcript_tab3")
 
         question = st.text_input("Ask a question about the video:")
         if st.button("Get Answer"):
             answer = answer_question(st.session_state.transcript, question)
-            st.write("**Answer:**", answer)
-    else:
-        st.warning("⚠️ Please generate a transcript first.")
+            st.write("Answer:", answer)
