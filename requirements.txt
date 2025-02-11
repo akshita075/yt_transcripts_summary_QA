@@ -11,6 +11,9 @@ scipy==1.15.1
 torch==2.6.0
 torchvision==0.21.0
 
+yt-dlp
+
+
 # YouTube Transcript & Downloading
 youtube-transcript-api==0.6.3
 yt-dlp==2024.12.23
