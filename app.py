@@ -112,6 +112,7 @@ def create_vector_index(transcript):
     return index, sentences
 
 # ✅ FUNCTION: Answer Question using RAG (Vector Search + Gemini)
+# ✅ FUNCTION: Answer Question using RAG (Vector Search + Gemini)
 def answer_question(transcript, question):
     try:
         if st.session_state.vector_index is None:
@@ -119,10 +120,17 @@ def answer_question(transcript, question):
 
         index, sentences = st.session_state.vector_index, st.session_state.sentences
 
+        # Encode the question and search for relevant sentences
         question_embedding = embedding_model.encode([question]).astype("float32")
         _, indices = index.search(question_embedding, k=3)  # Get top 3 relevant sentences
 
         relevant_sentences = ". ".join([sentences[idx] for idx in indices[0]])
 
+        # Use Google Gemini to generate an answer
         model = genai.GenerativeModel(model_name="gemini-1.5-pro")
-        response 
+        response = model.generate_content(f"Context:\n{relevant_sentences}\n\nAnswer this question: {question}")
+
+        return response.text.strip()
+    except Exception as e:
+        return f"Error answering question: {str(e)}"
+
