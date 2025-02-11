@@ -9,11 +9,12 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 from fuzzywuzzy import process
 import whisper
-import pytube
+import yt_dlp
+from pydub import AudioSegment
 
 # --- CONFIGURE API KEYS ---
-YOUTUBE_API_KEY = "AIzaSyBaNVUck5LpBp_t03g9SsxQgNG9e_KSA_o"  # Replace with your YouTube API key
-GEMINI_API_KEY = "AIzaSyCqRjVXULLvSqVCoJYit6fOAXPWqLAQfUs"  # Replace with your Google Gemini API key
+YOUTUBE_API_KEY = "AIzaSyBaNVUck5LpBp_t03g9SsxQgNG9e_KSA_o"  # Your YouTube API Key
+GEMINI_API_KEY = "AIzaSyCqRjVXULLvSqVCoJYit6fOAXPWqLAQfUs"  # Your Google Gemini API Key
 
 # --- Initialize Google Gemini API ---
 genai.configure(api_key=GEMINI_API_KEY)
@@ -80,16 +81,37 @@ def fetch_transcript(video_id):
 # --- FUNCTION: Whisper AI Transcription ---
 def transcribe_audio_whisper(video_url):
     try:
-        yt = pytube.YouTube(video_url)
-        audio_stream = yt.streams.filter(only_audio=True).first()
-        audio_file = "temp_audio.mp4"
-        audio_stream.download(filename=audio_file)
+        audio_file = "temp_audio.mp3"
 
+        # yt-dlp options to download the best audio format
+        ydl_opts = {
+            "format": "bestaudio/best",
+            "outtmpl": audio_file,
+            "postprocessors": [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }],
+        }
+
+        # Download the audio using yt-dlp
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([video_url])
+
+        # Convert MP3 to WAV using pydub
+        wav_file = "temp_audio.wav"
+        AudioSegment.from_file(audio_file).export(wav_file, format="wav")
+
+        # Use Whisper AI for transcription
         model = whisper.load_model("base")
-        result = model.transcribe(audio_file)
+        result = model.transcribe(wav_file)
 
-        os.remove(audio_file)  # Clean up file after processing
+        # Cleanup temporary files
+        os.remove(audio_file)
+        os.remove(wav_file)
+
         return result["text"]
+
     except Exception as e:
         return f"Error with Whisper AI: {str(e)}"
 
@@ -114,17 +136,7 @@ def create_vector_index(transcript):
 
     return index, sentences
 
-# ✅ FUNCTION: Fuzzy Matching for Question Relevance
-def get_best_matching_sentence(query, sentences, threshold=60):
-    best_matches = process.extract(query, sentences, limit=5)  # Get top 5 matches
-    relevant_sentences = [match[0] for match in best_matches if match[1] >= threshold]
-
-    if not relevant_sentences:
-        return "I couldn't find an exact match. Try rephrasing your question."
-
-    return ". ".join(relevant_sentences)
-
-# ✅ FUNCTION: Answer Question using RAG (Vector Search + Gemini + Fuzzy Matching)
+# ✅ FUNCTION: Answer Question using RAG (Vector Search + Gemini)
 def answer_question(transcript, question):
     try:
         if st.session_state.vector_index is None:
@@ -132,12 +144,10 @@ def answer_question(transcript, question):
 
         index, sentences = st.session_state.vector_index, st.session_state.sentences
 
-        relevant_sentences = get_best_matching_sentence(question, sentences)
+        question_embedding = embedding_model.encode([question]).astype("float32")
+        _, indices = index.search(question_embedding, k=3)  # Get top 3 relevant sentences
 
-        if "I couldn't find" in relevant_sentences:
-            question_embedding = embedding_model.encode([question]).astype("float32")
-            _, indices = index.search(question_embedding, k=3)
-            relevant_sentences = ". ".join([sentences[idx] for idx in indices[0]])
+        relevant_sentences = ". ".join([sentences[idx] for idx in indices[0]])
 
         model = genai.GenerativeModel(model_name="gemini-1.5-pro")
         response = model.generate_content(f"Context:\n{relevant_sentences}\n\nAnswer this question: {question}")
