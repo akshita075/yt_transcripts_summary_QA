@@ -1,1 +1,21 @@
-test_repo/
+# Ignore Python cache and logs
+__pycache__/
+*.pyc
+*.pyo
+*.log
+
+# Ignore large model files
+*.pt
+*.onnx
+*.h5
+*.tflite
+*.pkl
+
+# Ignore environment files
+venv/
+.env
+.DS_Store
+
+# Ignore large libraries
+*.dll
+*.lib
