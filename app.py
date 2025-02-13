@@ -102,13 +102,41 @@ def download_audio(video_url):
 # --- FUNCTION: Transcribe with Whisper ---
 def transcribe_with_whisper(audio_path):
     try:
-        st.write("🔄 Transcribing audio with Whisper AI...")
+        st.write("🔄 Downloading audio for Whisper AI...")
+        
+        # Download YouTube audio using yt-dlp
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': 'temp_audio.%(ext)s',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info_dict = ydl.extract_info(video_url, download=True)
+            file_name = ydl.prepare_filename(info_dict).replace('.webm', '.mp3')
+
+        if not os.path.exists(file_name):
+            return "❌ Error: Audio download failed."
+
+        st.write(f"🎵 Audio downloaded: {file_name}")
+
+        # Load Whisper model and transcribe
         model = whisper.load_model("base")
-        result = model.transcribe(audio_path)
+        result = model.transcribe(file_name)
+
+        st.write("✅ Whisper AI Transcription Complete!")
+
+        # Cleanup
+        os.remove(file_name)
+
         return result["text"]
+
     except Exception as e:
         return f"Error with Whisper AI: {str(e)}"
-
 # --- FUNCTION: Transcribe with AssemblyAI ---
 def transcribe_with_assemblyai(audio_path):
     try:
