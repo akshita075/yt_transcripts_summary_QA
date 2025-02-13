@@ -8,6 +8,27 @@ import faiss
 import numpy as np
 from sentence_transformers import SentenceTransformer
 import requests
+
+# ✅ Import pydub for audio processing
+from pydub import AudioSegment
+from pydub.utils import which
+
+# ✅ Ensure FFmpeg is installed
+os.system("apt-get update && apt-get install -y ffmpeg libavcodec-extra")
+
+# ✅ Set FFmpeg path for pydub
+AudioSegment.converter = which("ffmpeg")
+
+import os
+import streamlit as st
+from googleapiclient.discovery import build
+from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
+import google.generativeai as genai
+from urllib.parse import urlparse, parse_qs
+import faiss
+import numpy as np
+from sentence_transformers import SentenceTransformer
+import requests
 import yt_dlp
 import whisper
 import time
