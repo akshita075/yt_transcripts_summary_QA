@@ -1,3 +1,5 @@
+import streamlit as st  # ✅ Import Streamlit first
+st.set_page_config(page_title="YouTube Video Assistant", layout="wide")  # ✅ MUST be first Streamlit command
 import os
 import streamlit as st  # ✅ Import first
 from googleapiclient.discovery import build
