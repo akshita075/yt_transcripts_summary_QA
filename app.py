@@ -7,24 +7,16 @@ import numpy as np
 import json
 import torch
 from sentence_transformers import SentenceTransformer
-from transformers import pipeline, T5Tokenizer
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 from urllib.parse import urlparse, parse_qs
 
-# ✅ API Keys (Keep these)
+# ✅ API Keys (Keeping as provided)
 YOUTUBE_API_KEY = "AIzaSyBaNVUck5LpBp_t03g9SsxQgNG9e_KSA_o"
 GEMINI_API_KEY = "AIzaSyCqRjVXULLvSqVCoJYit6fOAXPWqLAQfUs"
 ASSEMBLYAI_API_KEY = "f8e218e5b7354f72ae11baeaff8d802f"
 
-# ✅ Initialize models
+# ✅ Set up the embedding model
 embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
-
-# ✅ Initialize FAISS for storing embeddings
-def initialize_faiss_database(dim=384):
-    return faiss.IndexFlatL2(dim)
-
-def generate_embeddings(text):
-    return np.array(embedding_model.encode([text]), dtype="float32")
 
 # ✅ Streamlit UI Setup
 st.set_page_config(page_title="YouTube Video Assistant", layout="wide")
@@ -39,7 +31,7 @@ def clean_url(video_url):
     video_id = query_params.get("v", [None])[0]
     return (f"https://www.youtube.com/watch?v={video_id}", video_id) if video_id else (None, None)
 
-# ✅ Fetch YouTube Transcript
+# ✅ Fetch YouTube Transcript (if available)
 def fetch_transcript(video_id):
     try:
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
@@ -50,22 +42,24 @@ def fetch_transcript(video_id):
     except (TranscriptsDisabled, NoTranscriptFound):
         return "**No transcript found via API. Trying Whisper AI...**"
 
-# ✅ Download Audio
+# ✅ Download Audio with yt-dlp using Cookies
 def download_audio(video_url):
     ydl_opts = {
         "format": "bestaudio/best",
         "outtmpl": "temp_audio.%(ext)s",
         "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}],
+        "cookies": "cookies.txt",  # Use your authenticated session
+        "noplaylist": True,  # Avoid downloading full playlists
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=True)
             file_name = ydl.prepare_filename(info).replace(".webm", ".mp3")
-        return file_name
+        return file_name if os.path.exists(file_name) else None
     except Exception as e:
         return f"Error downloading audio: {str(e)}"
 
-# ✅ Transcribe with Whisper
+# ✅ Transcribe with Whisper AI
 def transcribe_audio_whisper(audio_path):
     try:
         model = whisper.load_model("medium")
@@ -74,21 +68,13 @@ def transcribe_audio_whisper(audio_path):
     except Exception as e:
         return f"Error with Whisper AI: {str(e)}"
 
-# ✅ Summarize Transcript
+# ✅ Summarization (Temporary Placeholder)
 def summarize_transcript(transcript):
     return "Summary: " + transcript[:300] + "..."
 
-# ✅ FAISS-based Q/A
+# ✅ FAISS-based Q/A (Temporary Placeholder)
 def answer_question(transcript, question):
-    index = initialize_faiss_database()
-    embedding = generate_embeddings(transcript)
-    index.add(embedding)
-
-    question_embedding = generate_embeddings(question)
-    _, indices = index.search(question_embedding, k=1)
-
-    relevant_text = transcript
-    return f"Q: {question}\nA: {relevant_text}"
+    return f"Q: {question}\nA: {transcript[:200]}..."  # Placeholder for now
 
 # ✅ Streamlit UI Tabs
 tab1, tab2, tab3 = st.tabs(["📄 Transcription", "📑 Summarization", "❓ Q/A"])
@@ -100,8 +86,12 @@ with tab1:
         transcript = fetch_transcript(video_id)
 
         if "**No transcript found**" in transcript:
+            st.write("🔄 Trying Whisper AI...")
             audio_path = download_audio(video_url)
-            transcript = transcribe_audio_whisper(audio_path)
+            if audio_path:
+                transcript = transcribe_audio_whisper(audio_path)
+            else:
+                transcript = "❌ Audio download failed. Check cookies.txt or video restrictions."
 
         st.session_state.transcript = transcript
         st.text_area("Transcript", transcript, height=300)
