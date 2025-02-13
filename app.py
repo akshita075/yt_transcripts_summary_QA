@@ -9,16 +9,30 @@ import subprocess
 import faiss
 import numpy as np
 from sentence_transformers import SentenceTransformer
-
+import streamlit as st  # ✅ Import first
 import os
-import streamlit as st
+from googleapiclient.discovery import build
+from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
+import google.generativeai as genai
+from urllib.parse import urlparse, parse_qs
+import faiss
+import numpy as np
+from sentence_transformers import SentenceTransformer
+import requests
+import yt_dlp
+import whisper
+import time
+from pydub import AudioSegment
+from pydub.utils import which
 
-PORT = int(os.environ.get("PORT", 10000))  # Default to 10000
-st.set_page_config(page_title="YouTube Assistant", layout="wide")
+# ✅ Move this to the very top, immediately after imports
+st.set_page_config(page_title="YouTube Video Assistant", layout="wide")
 
-if __name__ == "__main__":
-    st.write("Running on Render with fixed port 10000")
+# ✅ Ensure FFmpeg is installed
+os.system("apt-get update && apt-get install -y ffmpeg libavcodec-extra")
 
+# ✅ Set FFmpeg path for pydub
+AudioSegment.converter = which("ffmpeg")
 
 # --- CONFIGURE API KEYS ---
 YOUTUBE_API_KEY = "AIzaSyBaNVUck5LpBp_t03g9SsxQgNG9e_KSA_o"  # Replace with your YouTube API key
