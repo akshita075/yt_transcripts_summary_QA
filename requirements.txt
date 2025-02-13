@@ -6,6 +6,10 @@ faiss-cpu==1.10.0
 sentence-transformers==3.4.1
 numpy==2.0.2
 pydub
+ffmpeg
+pydub
+yt-dlp
+whisper
 
 pandas==2.2.3
 scikit-learn==1.6.1

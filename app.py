@@ -90,17 +90,24 @@ def clean_url(video_url):
 def fetch_transcript(video_id):
     try:
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+
         for transcript in transcript_list:
             if transcript.language_code == "en":
                 return " ".join([entry["text"] for entry in transcript.fetch()])
+
         for transcript in transcript_list:
             if transcript.is_generated:
                 return " ".join([entry["text"] for entry in transcript.fetch()])
-        return "**No transcript found via API. Trying Whisper AI...**"
-    except (TranscriptsDisabled, NoTranscriptFound):
+
         return "**No YouTube transcript. Trying Whisper AI...**"
+    
+    except (TranscriptsDisabled, NoTranscriptFound):
+        st.write("📢 No transcript found via YouTube API, switching to Whisper AI...")
+        return transcribe_audio_whisper(f"https://www.youtube.com/watch?v={video_id}")
+
     except Exception as e:
         return f"Error fetching transcript: {str(e)}"
+
 
 # --- FUNCTION: Download Audio with yt-dlp ---
 def download_audio(video_url):
@@ -121,13 +128,44 @@ def download_audio(video_url):
         return f"Error downloading audio: {str(e)}"
 
 # --- FUNCTION: Transcribe with Whisper ---
-def transcribe_with_whisper(audio_path):
+import whisper
+import yt_dlp
+
+def transcribe_audio_whisper(video_url):
     try:
+        st.write("🔄 Downloading audio for Whisper AI...")
+        
+        # Download YouTube audio using yt-dlp
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+            'outtmpl': "temp_audio.%(ext)s",
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info_dict = ydl.extract_info(video_url, download=True)
+            file_name = ydl.prepare_filename(info_dict).replace('.webm', '.mp3')
+
+        st.write(f"🎵 Audio downloaded: {file_name}")
+
+        # Load Whisper model and transcribe
         model = whisper.load_model("base")
-        result = model.transcribe(audio_path)
+        result = model.transcribe(file_name)
+
+        st.write("✅ Whisper AI Transcription Complete!")
+
+        # Cleanup
+        os.remove(file_name)
+
         return result["text"]
+
     except Exception as e:
         return f"Error with Whisper AI: {str(e)}"
+
 
 # --- FUNCTION: Transcribe with AssemblyAI ---
 def transcribe_with_assemblyai(audio_path):
