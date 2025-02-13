@@ -10,6 +10,16 @@ import faiss
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
+import os
+import streamlit as st
+
+PORT = int(os.environ.get("PORT", 10000))  # Default to 10000
+st.set_page_config(page_title="YouTube Assistant", layout="wide")
+
+if __name__ == "__main__":
+    st.write("Running on Render with fixed port 10000")
+
+
 # --- CONFIGURE API KEYS ---
 YOUTUBE_API_KEY = "AIzaSyBaNVUck5LpBp_t03g9SsxQgNG9e_KSA_o"  # Replace with your YouTube API key
 GEMINI_API_KEY = "AIzaSyCqRjVXULLvSqVCoJYit6fOAXPWqLAQfUs"    # Replace with your Google Gemini API key
