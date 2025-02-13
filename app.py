@@ -128,16 +128,20 @@ def transcribe_with_assemblyai(audio_path):
 
 # --- FUNCTION: Summarize Transcript using Google Gemini API ---
 @st.cache_data
+from transformers import pipeline
+
+# ✅ Load T5 Summarization Model
+summarization_pipeline = pipeline("summarization", model="google/flan-t5-large")
+
 def summarize_transcript(transcript):
     if not transcript or transcript.strip() == "":
         return "⚠️ No transcript available to summarize."
-    
+
     try:
-        model = genai.GenerativeModel(model_name="gemini-1.5-pro")
-        response = model.generate_content(f"Summarize this:\n\n{transcript}")
-        return response.text.strip()
+        summary = summarization_pipeline(transcript, max_length=150, min_length=50, do_sample=False)
+        return summary[0]['summary_text']
     except Exception as e:
-        return f"❌ Error summarizing transcript with Gemini: {str(e)}"
+        return f"❌ Error summarizing transcript with T5: {str(e)}"
 
 # ✅ FUNCTION: Answer Question using RAG (Vector Search + Gemini)
 def answer_question(transcript, question):
