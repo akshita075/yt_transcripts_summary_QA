@@ -20,6 +20,9 @@ os.system("apt-get update && apt-get install -y ffmpeg libavcodec-extra")
 # ✅ Set FFmpeg path for pydub
 AudioSegment.converter = which("ffmpeg")
 
+# 🔍 Print FFmpeg version for debugging
+os.system("ffmpeg -version")
+
 # --- CONFIGURE API KEYS ---
 YOUTUBE_API_KEY = "AIzaSyBaNVUck5LpBp_t03g9SsxQgNG9e_KSA_o"
 GEMINI_API_KEY = "AIzaSyCqRjVXULLvSqVCoJYit6fOAXPWqLAQfUs"
@@ -78,9 +81,9 @@ def fetch_transcript(video_id):
         return f"Error fetching transcript: {str(e)}"
 
 # --- FUNCTION: Download Audio with yt-dlp ---
-import yt_dlp
-
 def download_audio(video_url):
+    st.write("🔄 Downloading YouTube audio...")
+
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': 'temp_audio.%(ext)s',
@@ -94,49 +97,35 @@ def download_audio(video_url):
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([video_url])
+        st.write("✅ Audio downloaded successfully")
         return "temp_audio.mp3"
     except Exception as e:
         return f"Error downloading audio: {str(e)}"
 
-
 # --- FUNCTION: Transcribe with Whisper ---
 def transcribe_with_whisper(audio_path):
     try:
-        st.write("🔄 Downloading audio for Whisper AI...")
-        
-        # Download YouTube audio using yt-dlp
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': 'temp_audio.%(ext)s',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-        }
+        st.write("🔍 Checking if audio file exists before transcribing...")
+        if not os.path.exists(audio_path):
+            return "❌ Error: Audio file not found."
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info_dict = ydl.extract_info(video_url, download=True)
-            file_name = ydl.prepare_filename(info_dict).replace('.webm', '.mp3')
-
-        if not os.path.exists(file_name):
-            return "❌ Error: Audio download failed."
-
-        st.write(f"🎵 Audio downloaded: {file_name}")
+        st.write(f"🎵 Audio found: {audio_path}. Running Whisper AI...")
 
         # Load Whisper model and transcribe
-        model = whisper.load_model("base")
-        result = model.transcribe(file_name)
+        model = whisper.load_model("medium")  # Use medium model for better accuracy
+        result = model.transcribe(audio_path)
 
         st.write("✅ Whisper AI Transcription Complete!")
 
-        # Cleanup
-        os.remove(file_name)
+        # Cleanup only after confirming transcription
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
 
         return result["text"]
 
     except Exception as e:
         return f"Error with Whisper AI: {str(e)}"
+
 # --- FUNCTION: Transcribe with AssemblyAI ---
 def transcribe_with_assemblyai(audio_path):
     try:
@@ -160,45 +149,6 @@ def transcribe_with_assemblyai(audio_path):
             time.sleep(5)
     except Exception as e:
         return f"Error with AssemblyAI: {str(e)}"
-
-# --- FUNCTION: Summarize Transcript using Google Gemini API ---
-@st.cache_data
-def summarize_transcript(transcript):
-    try:
-        model = genai.GenerativeModel(model_name="gemini-1.5-pro")
-        response = model.generate_content(f"Summarize this:\n\n{transcript}")
-        return response.text.strip()
-    except Exception as e:
-        return f"Error summarizing transcript with Gemini: {str(e)}"
-
-# ✅ FUNCTION: Create FAISS Vector Index for RAG-based Q/A
-@st.cache_data
-def create_vector_index(transcript):
-    sentences = transcript.split(". ")
-    embeddings = embedding_model.encode(sentences)
-
-    index = faiss.IndexFlatL2(embeddings.shape[1])
-    index.add(np.array(embeddings).astype("float32"))
-
-    return index, sentences
-
-# ✅ FUNCTION: Answer Question using RAG (Vector Search + Gemini)
-def answer_question(transcript, question):
-    try:
-        if st.session_state.vector_index is None:
-            st.session_state.vector_index, st.session_state.sentences = create_vector_index(transcript)
-
-        index, sentences = st.session_state.vector_index, st.session_state.sentences
-        question_embedding = embedding_model.encode([question]).astype("float32")
-        _, indices = index.search(question_embedding, k=3)
-        relevant_sentences = ". ".join([sentences[idx] for idx in indices[0]])
-
-        model = genai.GenerativeModel(model_name="gemini-1.5-pro")
-        response = model.generate_content(f"Context:\n{relevant_sentences}\n\nAnswer this question: {question}")
-
-        return response.text.strip()
-    except Exception as e:
-        return f"Error answering question: {str(e)}"
 
 # --- UI Tabs for Layout ---
 tab1, tab2, tab3 = st.tabs(["📄 Transcription", "📑 Summarization", "❓ Q/A"])
