@@ -135,4 +135,4 @@ with tab3:
             answer = answer_question(st.session_state.transcript, question)
             st.write("Answer:", answer)
     else:
-        st.warning("⚠️ Please generate a transcript first.") --add in this code,modify and give me
+        st.warning("⚠️ Please generate a transcript first.") 
