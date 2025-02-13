@@ -4,13 +4,12 @@ import yt_dlp
 import whisper
 import faiss
 import numpy as np
-import requests
 import json
 import torch
 from sentence_transformers import SentenceTransformer
 from transformers import pipeline, T5Tokenizer
-from urllib.parse import urlparse, parse_qs
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
+from urllib.parse import urlparse, parse_qs
 
 # ✅ API Keys (Keep these)
 YOUTUBE_API_KEY = "AIzaSyBaNVUck5LpBp_t03g9SsxQgNG9e_KSA_o"
@@ -20,7 +19,7 @@ ASSEMBLYAI_API_KEY = "f8e218e5b7354f72ae11baeaff8d802f"
 # ✅ Initialize models
 embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 
-# ✅ Set up FAISS for embedding search
+# ✅ Initialize FAISS for storing embeddings
 def initialize_faiss_database(dim=384):
     return faiss.IndexFlatL2(dim)
 
@@ -33,14 +32,14 @@ st.title("🎥 YouTube Video Assistant - RAG Enhanced")
 
 video_url = st.text_input("Enter YouTube Video URL:")
 
-# --- FUNCTION: Extract and Clean YouTube Video URL ---
+# ✅ Extract Video ID
 def clean_url(video_url):
     parsed_url = urlparse(video_url)
     query_params = parse_qs(parsed_url.query)
     video_id = query_params.get("v", [None])[0]
     return (f"https://www.youtube.com/watch?v={video_id}", video_id) if video_id else (None, None)
 
-# --- FUNCTION: Fetch YouTube Transcript ---
+# ✅ Fetch YouTube Transcript
 def fetch_transcript(video_id):
     try:
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
@@ -51,7 +50,7 @@ def fetch_transcript(video_id):
     except (TranscriptsDisabled, NoTranscriptFound):
         return "**No transcript found via API. Trying Whisper AI...**"
 
-# --- FUNCTION: Download Audio ---
+# ✅ Download Audio
 def download_audio(video_url):
     ydl_opts = {
         "format": "bestaudio/best",
@@ -66,7 +65,7 @@ def download_audio(video_url):
     except Exception as e:
         return f"Error downloading audio: {str(e)}"
 
-# --- FUNCTION: Transcribe with Whisper ---
+# ✅ Transcribe with Whisper
 def transcribe_audio_whisper(audio_path):
     try:
         model = whisper.load_model("medium")
@@ -75,44 +74,23 @@ def transcribe_audio_whisper(audio_path):
     except Exception as e:
         return f"Error with Whisper AI: {str(e)}"
 
-# --- FUNCTION: Transcribe with AssemblyAI ---
-def transcribe_with_assemblyai(audio_path):
-    headers = {"authorization": ASSEMBLYAI_API_KEY}
-    with open(audio_path, "rb") as f:
-        response = requests.post("https://api.assemblyai.com/v2/upload", headers=headers, files={"file": f})
-    if response.status_code != 200:
-        return f"Error uploading file: {response.text}"
-
-    audio_url = response.json().get("upload_url")
-    response = requests.post("https://api.assemblyai.com/v2/transcript", json={"audio_url": audio_url}, headers=headers)
-    transcript_id = response.json().get("id")
-
-    while True:
-        transcript_response = requests.get(f"https://api.assemblyai.com/v2/transcript/{transcript_id}", headers=headers)
-        transcript_data = transcript_response.json()
-        if transcript_data.get("status") == "completed":
-            return transcript_data["text"]
-        elif transcript_data.get("status") == "failed":
-            return "❌ Failed to transcribe the audio."
-        time.sleep(5)
-
-# --- FUNCTION: Summarize Transcript ---
+# ✅ Summarize Transcript
 def summarize_transcript(transcript):
     return "Summary: " + transcript[:300] + "..."
 
-# --- FUNCTION: Answer Question using FAISS ---
+# ✅ FAISS-based Q/A
 def answer_question(transcript, question):
     index = initialize_faiss_database()
     embedding = generate_embeddings(transcript)
     index.add(embedding)
-    
+
     question_embedding = generate_embeddings(question)
     _, indices = index.search(question_embedding, k=1)
-    
+
     relevant_text = transcript
     return f"Q: {question}\nA: {relevant_text}"
 
-# --- UI Tabs ---
+# ✅ Streamlit UI Tabs
 tab1, tab2, tab3 = st.tabs(["📄 Transcription", "📑 Summarization", "❓ Q/A"])
 
 with tab1:
@@ -124,9 +102,6 @@ with tab1:
         if "**No transcript found**" in transcript:
             audio_path = download_audio(video_url)
             transcript = transcribe_audio_whisper(audio_path)
-
-            if "Error" in transcript:
-                transcript = transcribe_with_assemblyai(audio_path)
 
         st.session_state.transcript = transcript
         st.text_area("Transcript", transcript, height=300)
