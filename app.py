@@ -78,10 +78,13 @@ def fetch_transcript(video_id):
         return f"Error fetching transcript: {str(e)}"
 
 # --- FUNCTION: Download Audio with yt-dlp ---
+import yt_dlp
+
 def download_audio(video_url):
     ydl_opts = {
         'format': 'bestaudio/best',
-        'outtmpl': 'temp_audio.mp3',
+        'outtmpl': 'temp_audio.%(ext)s',
+        'cookiefile': 'cookies.txt',  # ✅ Always use cookies
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
@@ -93,7 +96,8 @@ def download_audio(video_url):
             ydl.download([video_url])
         return "temp_audio.mp3"
     except Exception as e:
-        return None
+        return f"Error downloading audio: {str(e)}"
+
 
 # --- FUNCTION: Transcribe with Whisper ---
 def transcribe_with_whisper(audio_path):
