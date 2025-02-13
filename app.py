@@ -20,9 +20,6 @@ os.system("apt-get update && apt-get install -y ffmpeg libavcodec-extra")
 # ✅ Set FFmpeg path for pydub
 AudioSegment.converter = which("ffmpeg")
 
-# 🔍 Print FFmpeg version for debugging
-os.system("ffmpeg -version")
-
 # --- CONFIGURE API KEYS ---
 YOUTUBE_API_KEY = "AIzaSyBaNVUck5LpBp_t03g9SsxQgNG9e_KSA_o"
 GEMINI_API_KEY = "AIzaSyCqRjVXULLvSqVCoJYit6fOAXPWqLAQfUs"
@@ -63,15 +60,12 @@ def clean_url(video_url):
 def fetch_transcript(video_id):
     try:
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-
         for transcript in transcript_list:
             if transcript.language_code == "en":
                 return " ".join([entry["text"] for entry in transcript.fetch()])
-
         for transcript in transcript_list:
             if transcript.is_generated:
                 return " ".join([entry["text"] for entry in transcript.fetch()])
-
         return "**No YouTube transcript. Trying Whisper AI...**"
     
     except (TranscriptsDisabled, NoTranscriptFound):
@@ -82,8 +76,6 @@ def fetch_transcript(video_id):
 
 # --- FUNCTION: Download Audio with yt-dlp ---
 def download_audio(video_url):
-    st.write("🔄 Downloading YouTube audio...")
-
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': 'temp_audio.%(ext)s',
@@ -97,7 +89,6 @@ def download_audio(video_url):
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([video_url])
-        st.write("✅ Audio downloaded successfully")
         return "temp_audio.mp3"
     except Exception as e:
         return f"Error downloading audio: {str(e)}"
@@ -105,24 +96,9 @@ def download_audio(video_url):
 # --- FUNCTION: Transcribe with Whisper ---
 def transcribe_with_whisper(audio_path):
     try:
-        st.write("🔍 Checking if audio file exists before transcribing...")
-        if not os.path.exists(audio_path):
-            return "❌ Error: Audio file not found."
-
-        st.write(f"🎵 Audio found: {audio_path}. Running Whisper AI...")
-
-        # Load Whisper model and transcribe
-        model = whisper.load_model("medium")  # Use medium model for better accuracy
+        model = whisper.load_model("base")
         result = model.transcribe(audio_path)
-
-        st.write("✅ Whisper AI Transcription Complete!")
-
-        # Cleanup only after confirming transcription
-        if os.path.exists(audio_path):
-            os.remove(audio_path)
-
         return result["text"]
-
     except Exception as e:
         return f"Error with Whisper AI: {str(e)}"
 
@@ -150,6 +126,37 @@ def transcribe_with_assemblyai(audio_path):
     except Exception as e:
         return f"Error with AssemblyAI: {str(e)}"
 
+# --- FUNCTION: Summarize Transcript using Google Gemini API ---
+@st.cache_data
+def summarize_transcript(transcript):
+    if not transcript or transcript.strip() == "":
+        return "⚠️ No transcript available to summarize."
+    
+    try:
+        model = genai.GenerativeModel(model_name="gemini-1.5-pro")
+        response = model.generate_content(f"Summarize this:\n\n{transcript}")
+        return response.text.strip()
+    except Exception as e:
+        return f"❌ Error summarizing transcript with Gemini: {str(e)}"
+
+# ✅ FUNCTION: Answer Question using RAG (Vector Search + Gemini)
+def answer_question(transcript, question):
+    try:
+        if st.session_state.vector_index is None:
+            st.session_state.vector_index, st.session_state.sentences = create_vector_index(transcript)
+
+        index, sentences = st.session_state.vector_index, st.session_state.sentences
+        question_embedding = embedding_model.encode([question]).astype("float32")
+        _, indices = index.search(question_embedding, k=3)
+        relevant_sentences = ". ".join([sentences[idx] for idx in indices[0]])
+
+        model = genai.GenerativeModel(model_name="gemini-1.5-pro")
+        response = model.generate_content(f"Context:\n{relevant_sentences}\n\nAnswer this question: {question}")
+
+        return response.text.strip()
+    except Exception as e:
+        return f"Error answering question: {str(e)}"
+
 # --- UI Tabs for Layout ---
 tab1, tab2, tab3 = st.tabs(["📄 Transcription", "📑 Summarization", "❓ Q/A"])
 
@@ -168,6 +175,9 @@ with tab1:
 
 with tab2:
     st.subheader("Summary")
+    if not st.session_state.transcript:
+        st.warning("⚠️ No transcript available. Please generate a transcript first.")
+
     if st.button("Summarize Content") and st.session_state.transcript:
         st.session_state.summary = summarize_transcript(st.session_state.transcript)
         st.text_area("Summary", st.session_state.summary, height=200)
