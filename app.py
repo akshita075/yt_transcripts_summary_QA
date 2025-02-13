@@ -1,50 +1,30 @@
 import os
 import streamlit as st
 from googleapiclient.discovery import build
-from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
+from youtube_transcript_api import YouTubeTranscriptApi
+import whisper
 import google.generativeai as genai
 from urllib.parse import urlparse, parse_qs
+import subprocess
 import faiss
 import numpy as np
 from sentence_transformers import SentenceTransformer
-import requests
-import yt_dlp
-import whisper
-import time
-from pydub import AudioSegment
-from pydub.utils import which
-
-# ✅ Ensure FFmpeg is installed
-os.system("apt-get update && apt-get install -y ffmpeg libavcodec-extra")
-
-# ✅ Set FFmpeg path for pydub
-AudioSegment.converter = which("ffmpeg")
 
 # --- CONFIGURE API KEYS ---
-YOUTUBE_API_KEY = "AIzaSyBaNVUck5LpBp_t03g9SsxQgNG9e_KSA_o"
-GEMINI_API_KEY = "AIzaSyCqRjVXULLvSqVCoJYit6fOAXPWqLAQfUs"
-ASSEMBLYAI_API_KEY = "f8e218e5b7354f72ae11baeaff8d802f"
+YOUTUBE_API_KEY = "AIzaSyBaNVUck5LpBp_t03g9SsxQgNG9e_KSA_o"  # Replace with your YouTube API key
+GEMINI_API_KEY = "AIzaSyCqRjVXULLvSqVCoJYit6fOAXPWqLAQfUs"    # Replace with your Google Gemini API key
 
 # --- Initialize Google Gemini API ---
 genai.configure(api_key=GEMINI_API_KEY)
 
-# --- Initialize Sentence Transformer for Q/A ---
+# --- Initialize Sentence Transformer for Faster Q/A ---
 embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 
 # --- Streamlit UI Layout ---
-st.set_page_config(page_title="YouTube Video Assistant - RAG Enhanced", layout="wide")
-st.title("🎥 YouTube Video Assistant - RAG Enhanced")
-st.write("Process multiple YouTube videos for **transcription, summarization, and Q/A using RAG**.")
+st.set_page_config(page_title="YouTube Video Assistant", layout="wide")
 
-# ✅ Initialize session state
-if "transcript" not in st.session_state:
-    st.session_state.transcript = None
-if "summary" not in st.session_state:
-    st.session_state.summary = None
-if "vector_index" not in st.session_state:
-    st.session_state.vector_index = None
-if "sentences" not in st.session_state:
-    st.session_state.sentences = None
+st.title("🎥 YouTube Video Assistant")
+st.write("Process a YouTube video for **transcription, summarization, and Q/A**.")
 
 video_url = st.text_input("Enter YouTube Video URL:")
 
@@ -53,113 +33,45 @@ def clean_url(video_url):
     parsed_url = urlparse(video_url)
     query_params = parse_qs(parsed_url.query)
     video_id = query_params.get("v", [None])[0]
-    return (f"https://www.youtube.com/watch?v={video_id}", video_id) if video_id else (None, None)
 
-# --- FUNCTION: Fetch YouTube Transcript ---
+    if video_id:
+        return f"https://www.youtube.com/watch?v={video_id}", video_id
+    elif "youtu.be" in video_url:
+        video_id = parsed_url.path.lstrip("/")
+        return f"https://youtu.be/{video_id}", video_id
+    else:
+        return None, None
+
+# --- FUNCTION: Fetch Captions using YouTube API ---
 @st.cache_data
-def fetch_transcript(video_id):
+def get_video_captions(video_url):
+    _, video_id = clean_url(video_url)
+    if not video_id:
+        return "Invalid YouTube URL!", None
+
     try:
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
+        request = youtube.captions().list(part="snippet", videoId=video_id)
+        response = request.execute()
 
-        for transcript in transcript_list:
-            if transcript.language_code == "en":
-                return " ".join([entry["text"] for entry in transcript.fetch()])
+        if "items" in response and response["items"]:
+            captions = [item["snippet"]["language"] for item in response["items"]]
+            return f"Available captions: {', '.join(captions)}", video_id
+        else:
+            return "No captions available.", video_id
 
-        for transcript in transcript_list:
-            if transcript.is_generated:
-                return " ".join([entry["text"] for entry in transcript.fetch()])
+    except Exception as e:
+        return f"Error fetching captions: {str(e)}", None
 
-        return "**No YouTube transcript. Trying Whisper AI...**"
-    
-    except (TranscriptsDisabled, NoTranscriptFound):
-        return "**No transcript found via API. Switching to Whisper AI...**"
-
+# --- FUNCTION: Fetch Transcript using YouTubeTranscriptApi ---
+@st.cache_data
+def fetch_transcript(video_id, language="en"):
+    try:
+        transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=[language])
+        full_transcript = " ".join([entry["text"] for entry in transcript])
+        return full_transcript
     except Exception as e:
         return f"Error fetching transcript: {str(e)}"
-
-# --- FUNCTION: Download Audio with yt-dlp ---
-import yt_dlp
-
-def download_audio(video_url):
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'outtmpl': 'temp_audio.%(ext)s',
-        'cookiefile': 'cookies.txt',  # ✅ Always use cookies
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192'
-        }],
-    }
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([video_url])
-        return "temp_audio.mp3"
-    except Exception as e:
-        return f"Error downloading audio: {str(e)}"
-
-
-# --- FUNCTION: Transcribe with Whisper ---
-def transcribe_with_whisper(audio_path):
-    try:
-        st.write("🔄 Downloading audio for Whisper AI...")
-        
-        # Download YouTube audio using yt-dlp
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': 'temp_audio.%(ext)s',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-        }
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info_dict = ydl.extract_info(video_url, download=True)
-            file_name = ydl.prepare_filename(info_dict).replace('.webm', '.mp3')
-
-        if not os.path.exists(file_name):
-            return "❌ Error: Audio download failed."
-
-        st.write(f"🎵 Audio downloaded: {file_name}")
-
-        # Load Whisper model and transcribe
-        model = whisper.load_model("base")
-        result = model.transcribe(file_name)
-
-        st.write("✅ Whisper AI Transcription Complete!")
-
-        # Cleanup
-        os.remove(file_name)
-
-        return result["text"]
-
-    except Exception as e:
-        return f"Error with Whisper AI: {str(e)}"
-# --- FUNCTION: Transcribe with AssemblyAI ---
-def transcribe_with_assemblyai(audio_path):
-    try:
-        headers = {"authorization": ASSEMBLYAI_API_KEY}
-        with open(audio_path, "rb") as f:
-            response = requests.post("https://api.assemblyai.com/v2/upload", headers=headers, files={"file": f})
-        if response.status_code != 200:
-            return f"Error uploading file: {response.text}"
-
-        audio_url = response.json().get("upload_url")
-        response = requests.post("https://api.assemblyai.com/v2/transcript", json={"audio_url": audio_url}, headers=headers)
-        transcript_id = response.json().get("id")
-
-        while True:
-            transcript_response = requests.get(f"https://api.assemblyai.com/v2/transcript/{transcript_id}", headers=headers)
-            transcript_data = transcript_response.json()
-            if transcript_data.get("status") == "completed":
-                return transcript_data["text"]
-            elif transcript_data.get("status") == "failed":
-                return "❌ Failed to transcribe the audio."
-            time.sleep(5)
-    except Exception as e:
-        return f"Error with AssemblyAI: {str(e)}"
 
 # --- FUNCTION: Summarize Transcript using Google Gemini API ---
 @st.cache_data
@@ -171,59 +83,107 @@ def summarize_transcript(transcript):
     except Exception as e:
         return f"Error summarizing transcript with Gemini: {str(e)}"
 
-# ✅ FUNCTION: Create FAISS Vector Index for RAG-based Q/A
+# --- FUNCTION: Generate Vector Index for Fast Q/A ---
 @st.cache_data
 def create_vector_index(transcript):
     sentences = transcript.split(". ")
-    embeddings = embedding_model.encode(sentences)
+    sentence_embeddings = embedding_model.encode(sentences)
 
-    index = faiss.IndexFlatL2(embeddings.shape[1])
-    index.add(np.array(embeddings).astype("float32"))
+    index = faiss.IndexFlatL2(sentence_embeddings.shape[1])
+    index.add(np.array(sentence_embeddings).astype("float32"))
 
     return index, sentences
 
-# ✅ FUNCTION: Answer Question using RAG (Vector Search + Gemini)
+# --- FUNCTION: Answer Questions using Gemini API + Vector Search ---
 def answer_question(transcript, question):
     try:
-        if st.session_state.vector_index is None:
-            st.session_state.vector_index, st.session_state.sentences = create_vector_index(transcript)
+        index, sentences = create_vector_index(transcript)
 
-        index, sentences = st.session_state.vector_index, st.session_state.sentences
         question_embedding = embedding_model.encode([question]).astype("float32")
-        _, indices = index.search(question_embedding, k=3)
+        _, indices = index.search(question_embedding, k=3)  # Get top 3 most relevant sentences
+
         relevant_sentences = ". ".join([sentences[idx] for idx in indices[0]])
 
         model = genai.GenerativeModel(model_name="gemini-1.5-pro")
-        response = model.generate_content(f"Context:\n{relevant_sentences}\n\nAnswer this question: {question}")
-
+        response = model.generate_content(f"Based on this transcript:\n\n{relevant_sentences}\n\nAnswer this question: {question}")
         return response.text.strip()
     except Exception as e:
         return f"Error answering question: {str(e)}"
 
-# --- UI Tabs for Layout ---
+# --- FUNCTION: Download Audio from YouTube ---
+@st.cache_data
+def download_audio(video_url):
+    try:
+        cleaned_url, _ = clean_url(video_url)
+        if not cleaned_url:
+            return "Error: Invalid YouTube URL."
+
+        command = [
+            "yt-dlp",
+            "--extract-audio",
+            "--audio-format", "mp3",
+            "--audio-quality", "5",
+            "-o", "audio.%(ext)s",
+            cleaned_url
+        ]
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+        if result.returncode == 0:
+            return "audio.mp3"
+        else:
+            return f"Error downloading audio: {result.stderr}"
+
+    except Exception as e:
+        return f"Error downloading audio: {str(e)}"
+
+# --- FUNCTION: Transcribe Audio using Whisper ---
+@st.cache_data
+def transcribe_audio(audio_file):
+    try:
+        model = whisper.load_model("small")
+        result = model.transcribe(audio_file)
+        return result["text"]
+    except Exception as e:
+        return f"Error transcribing audio: {str(e)}"
+
+# --- UI Tabs for Better Layout ---
 tab1, tab2, tab3 = st.tabs(["📄 Transcription", "📑 Summarization", "❓ Q/A"])
 
+if "transcript" not in st.session_state:
+    st.session_state.transcript = None
+
 with tab1:
-    st.subheader("Transcript")
-    if st.button("Generate Transcript") and video_url:
-        _, video_id = clean_url(video_url)
-        transcript = fetch_transcript(video_id)
+    if st.button("Generate Transcript"):
+        if video_url:
+            captions, video_id = get_video_captions(video_url)
+            if "Available captions" in captions:
+                st.session_state.transcript = fetch_transcript(video_id)
+            else:
+                st.write("No captions available. Downloading audio...")
+                audio_file = download_audio(video_url)
+                if "Error" not in audio_file:
+                    st.session_state.transcript = transcribe_audio(audio_file)
+                else:
+                    st.session_state.transcript = audio_file  # Store error message
 
-        if "**No transcript found via API**" in transcript:
-            audio_path = download_audio(video_url)
-            transcript = transcribe_with_whisper(audio_path) if audio_path else transcribe_with_assemblyai(audio_path)
-
-        st.session_state.transcript = transcript
-        st.text_area("Transcript", transcript, height=300)
+            st.text_area("Transcript", st.session_state.transcript, height=300)
+        else:
+            st.write("⚠️ Please enter a valid YouTube URL.")
 
 with tab2:
-    st.subheader("Summary")
-    if st.button("Summarize Content") and st.session_state.transcript:
-        st.session_state.summary = summarize_transcript(st.session_state.transcript)
-        st.text_area("Summary", st.session_state.summary, height=200)
+    if st.button("Summarize Content"):
+        if st.session_state.transcript:
+            summary = summarize_transcript(st.session_state.transcript)
+            st.text_area("Summary", summary, height=200)
+        else:
+            st.write("⚠️ Generate transcript first.")
 
 with tab3:
-    st.subheader("Ask a Question")
     question = st.text_input("Ask a question about the video:")
     if st.button("Get Answer"):
-        st.write("Answer:", answer_question(st.session_state.transcript, question))
+        if st.session_state.transcript:
+            answer = answer_question(st.session_state.transcript, question)
+            st.write("Answer:")
+            st.write(answer)
+        else:
+            st.write("⚠️ Generate transcript first.")
