@@ -19,3 +19,4 @@ venv/
 # Ignore large libraries
 *.dll
 *.lib
+ffmpeg-7.1-essential-builds/
