@@ -1,5 +1,6 @@
 import streamlit as st  # ✅ Import Streamlit first
 st.set_page_config(page_title="YouTube Video Assistant", layout="wide")  # ✅ MUST be first Streamlit command
+
 import os
 import streamlit as st  # ✅ Import first
 from googleapiclient.discovery import build
@@ -19,8 +20,6 @@ from pydub.utils import which
 # ✅ **THIS MUST BE THE FIRST STREAMLIT COMMAND**
 st.set_page_config(page_title="YouTube Video Assistant", layout="wide")
 
-# ✅ Ensure FFmpeg is installed
-os.system("apt-get update && apt-get install -y ffmpeg libavcodec-extra")
 
 # ✅ Set FFmpeg path for pydub
 AudioSegment.converter = which("ffmpeg")
