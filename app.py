@@ -1,16 +1,5 @@
 import os
-import streamlit as st
-from googleapiclient.discovery import build
-from youtube_transcript_api import YouTubeTranscriptApi
-import whisper
-import google.generativeai as genai
-from urllib.parse import urlparse, parse_qs
-import subprocess
-import faiss
-import numpy as np
-from sentence_transformers import SentenceTransformer
 import streamlit as st  # ✅ Import first
-import os
 from googleapiclient.discovery import build
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 import google.generativeai as genai
@@ -25,7 +14,7 @@ import time
 from pydub import AudioSegment
 from pydub.utils import which
 
-# ✅ Move this to the very top, immediately after imports
+# ✅ **THIS MUST BE THE FIRST STREAMLIT COMMAND**
 st.set_page_config(page_title="YouTube Video Assistant", layout="wide")
 
 # ✅ Ensure FFmpeg is installed
@@ -34,12 +23,14 @@ os.system("apt-get update && apt-get install -y ffmpeg libavcodec-extra")
 # ✅ Set FFmpeg path for pydub
 AudioSegment.converter = which("ffmpeg")
 
-# --- CONFIGURE API KEYS ---
-YOUTUBE_API_KEY = "AIzaSyBaNVUck5LpBp_t03g9SsxQgNG9e_KSA_o"  # Replace with your YouTube API key
-GEMINI_API_KEY = "AIzaSyCqRjVXULLvSqVCoJYit6fOAXPWqLAQfUs"    # Replace with your Google Gemini API key
+# ✅ Initialize API Keys
+YOUTUBE_API_KEY = "AIzaSyBaNVUck5LpBp_t03g9SsxQgNG9e_KSA_o"
+GEMINI_API_KEY = "AIzaSyCqRjVXULLvSqVCoJYit6fOAXPWqLAQfUs"
+ASSEMBLYAI_API_KEY = "f8e218e5b7354f72ae11baeaff8d802f"
 
-# --- Initialize Google Gemini API ---
+# ✅ Initialize Google Gemini API
 genai.configure(api_key=GEMINI_API_KEY)
+
 
 # --- Initialize Sentence Transformer for Faster Q/A ---
 embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
