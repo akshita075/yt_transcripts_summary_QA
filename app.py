@@ -2,7 +2,6 @@ import os
 import streamlit as st
 from googleapiclient.discovery import build
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
-import google.generativeai as genai
 from urllib.parse import urlparse, parse_qs
 import faiss
 import numpy as np
@@ -13,22 +12,16 @@ import whisper
 import time
 from pydub import AudioSegment
 from pydub.utils import which
+from transformers import pipeline
 
 # ✅ Ensure FFmpeg is installed
 os.system("apt-get update && apt-get install -y ffmpeg libavcodec-extra")
-
-# ✅ Set FFmpeg path for pydub
 AudioSegment.converter = which("ffmpeg")
 
-# --- CONFIGURE API KEYS ---
-YOUTUBE_API_KEY = "AIzaSyBaNVUck5LpBp_t03g9SsxQgNG9e_KSA_o"
-GEMINI_API_KEY = "AIzaSyCqRjVXULLvSqVCoJYit6fOAXPWqLAQfUs"
-ASSEMBLYAI_API_KEY = "f8e218e5b7354f72ae11baeaff8d802f"
+# ✅ Load T5 Summarization Model
+summarization_pipeline = pipeline("summarization", model="google/flan-t5-large")
 
-# --- Initialize Google Gemini API ---
-genai.configure(api_key=GEMINI_API_KEY)
-
-# --- Initialize Sentence Transformer for Q/A ---
+# ✅ Initialize Sentence Transformer for Q/A
 embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 
 # --- Streamlit UI Layout ---
@@ -60,12 +53,15 @@ def clean_url(video_url):
 def fetch_transcript(video_id):
     try:
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+
         for transcript in transcript_list:
             if transcript.language_code == "en":
                 return " ".join([entry["text"] for entry in transcript.fetch()])
+
         for transcript in transcript_list:
             if transcript.is_generated:
                 return " ".join([entry["text"] for entry in transcript.fetch()])
+
         return "**No YouTube transcript. Trying Whisper AI...**"
     
     except (TranscriptsDisabled, NoTranscriptFound):
@@ -96,8 +92,11 @@ def download_audio(video_url):
 # --- FUNCTION: Transcribe with Whisper ---
 def transcribe_with_whisper(audio_path):
     try:
+        st.write("🔄 Transcribing with Whisper AI...")
         model = whisper.load_model("base")
         result = model.transcribe(audio_path)
+        st.write("✅ Whisper AI Transcription Complete!")
+        os.remove(audio_path)  # Cleanup
         return result["text"]
     except Exception as e:
         return f"Error with Whisper AI: {str(e)}"
@@ -105,7 +104,7 @@ def transcribe_with_whisper(audio_path):
 # --- FUNCTION: Transcribe with AssemblyAI ---
 def transcribe_with_assemblyai(audio_path):
     try:
-        headers = {"authorization": ASSEMBLYAI_API_KEY}
+        headers = {"authorization": "YOUR_ASSEMBLYAI_KEY"}
         with open(audio_path, "rb") as f:
             response = requests.post("https://api.assemblyai.com/v2/upload", headers=headers, files={"file": f})
         if response.status_code != 200:
@@ -126,13 +125,8 @@ def transcribe_with_assemblyai(audio_path):
     except Exception as e:
         return f"Error with AssemblyAI: {str(e)}"
 
-# --- FUNCTION: Summarize Transcript using Google Gemini API ---
+# --- FUNCTION: Summarize Transcript using T5 (instead of Gemini) ---
 @st.cache_data
-from transformers import pipeline
-
-# ✅ Load T5 Summarization Model
-summarization_pipeline = pipeline("summarization", model="google/flan-t5-large")
-
 def summarize_transcript(transcript):
     if not transcript or transcript.strip() == "":
         return "⚠️ No transcript available to summarize."
@@ -143,7 +137,18 @@ def summarize_transcript(transcript):
     except Exception as e:
         return f"❌ Error summarizing transcript with T5: {str(e)}"
 
-# ✅ FUNCTION: Answer Question using RAG (Vector Search + Gemini)
+# ✅ FUNCTION: Create FAISS Vector Index for RAG-based Q/A
+@st.cache_data
+def create_vector_index(transcript):
+    sentences = transcript.split(". ")
+    embeddings = embedding_model.encode(sentences)
+
+    index = faiss.IndexFlatL2(embeddings.shape[1])
+    index.add(np.array(embeddings).astype("float32"))
+
+    return index, sentences
+
+# ✅ FUNCTION: Answer Question using RAG (Vector Search + T5)
 def answer_question(transcript, question):
     try:
         if st.session_state.vector_index is None:
@@ -154,10 +159,8 @@ def answer_question(transcript, question):
         _, indices = index.search(question_embedding, k=3)
         relevant_sentences = ". ".join([sentences[idx] for idx in indices[0]])
 
-        model = genai.GenerativeModel(model_name="gemini-1.5-pro")
-        response = model.generate_content(f"Context:\n{relevant_sentences}\n\nAnswer this question: {question}")
-
-        return response.text.strip()
+        response = summarization_pipeline(f"Context: {relevant_sentences}\n\nQuestion: {question}\nAnswer:")
+        return response[0]['summary_text']
     except Exception as e:
         return f"Error answering question: {str(e)}"
 
@@ -179,9 +182,6 @@ with tab1:
 
 with tab2:
     st.subheader("Summary")
-    if not st.session_state.transcript:
-        st.warning("⚠️ No transcript available. Please generate a transcript first.")
-
     if st.button("Summarize Content") and st.session_state.transcript:
         st.session_state.summary = summarize_transcript(st.session_state.transcript)
         st.text_area("Summary", st.session_state.summary, height=200)
